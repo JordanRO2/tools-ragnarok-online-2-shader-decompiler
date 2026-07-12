@@ -256,7 +256,9 @@ namespace DXDecompiler.DX9Shader
 						GetSourceName(instruction, 1), GetSourceName(instruction, 2));
 					break;
 				case Opcode.Nrm:
-					WriteLine("{0} = normalize({1});", GetDestinationName(instruction), GetSourceName(instruction, 1));
+					// D3D9 nrm always normalizes the 3-component vector (w ignored); force .xyz so fxc
+					// keeps the native nrm instead of a 4-component normalize that includes a live .w.
+					WriteLine("{0} = normalize(({1}).xyz);", GetDestinationName(instruction), GetSourceName(instruction, 1));
 					break;
 				case Opcode.Pow:
 					WriteLine("{0} = pow({1}, {2});", GetDestinationName(instruction),

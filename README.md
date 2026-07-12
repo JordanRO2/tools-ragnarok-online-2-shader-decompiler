@@ -82,11 +82,18 @@ Reconstruction:
   like `.xz`). Every non-skinning effect (all pixel-shading: colours, lighting, post-processing,
   terrain, water) is behaviour-exact.
 
-  The remaining 13 are the GPU-skinning **character** shaders. Their skinning *is* faithfully
-  reconstructed — the bone matrices are emitted `column_major float4x3[30]` so the recompiled bytecode
-  uses the original's exact `c[a0.x]` bone addressing (3-register/bone tight pack), verified against
-  the original assembly. The residual sub-pixel difference (~2% of channel range, at silhouette edges)
-  is **not** a reconstruction defect: it is floating-point accumulation-order divergence between the
-  modern `fxc` and the 2009-era HLSL compiler (9.29) that built the original assets — feeding
-  bit-identical bone data and weights still leaves it, and it is invariant to every skinning-form
-  change. It cannot be closed at the decompiler level.
+  The remaining 13 are the GPU-skinning **character** shaders. Their vertex/pixel reconstruction was
+  audited op-by-op against the original assembly (bisected with `fxc /O0` to remove optimisation
+  noise), which turned up three further *correctness* fixes the render harness could not see (its
+  synthetic bone matrices are near-identity): the bone-matrix index divide underflowed on `vs_2_0`
+  (`floor(a0.x * 0.3333333)` rounds `3·b` down to `b−1`, shifting every bone — corrected with `+1`);
+  `nrm` was decompiled as a 4-component `normalize()` instead of 3-component; and the `defi`
+  (integer-def) constant path had the same non-prefix-mask bug as the float path. With those applied
+  the character skinning, position, normal/SH-lighting and toon pixel paths are all faithful.
+
+  The residual sub-pixel difference (~2% of channel range, confined to silhouette edges) is **not** a
+  reconstruction defect: the pixel shader is provably faithful (replacing its output with a constant
+  leaves the diff unchanged) and the divergence is a ~1-pixel silhouette shift from the position
+  transform — a numeric difference between the modern `fxc` and the 2009-era compiler (9.29) that
+  built the assets, invariant to optimisation level and to every position/matrix reformulation. It
+  cannot be closed at the decompiler level.

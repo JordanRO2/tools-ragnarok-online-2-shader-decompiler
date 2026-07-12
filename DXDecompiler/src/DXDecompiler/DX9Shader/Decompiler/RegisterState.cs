@@ -270,9 +270,14 @@ namespace DXDecompiler.DX9Shader
 							? data.Type.Columns : data.Type.Rows;
 						if(regsPerElem == 0) regsPerElem = 1;
 						uint baseElem = totalOffset / regsPerElem;
+						// a0 holds the register offset (element * regsPerElem, always an exact multiple).
+						// vs_2_0 has no integer ops, so fxc emulates the divide as floor(a0 * (1/N)) with
+						// a rounded-DOWN reciprocal (0.3333333 < 1/3): an exact 3*b yields 0.9999997*b and
+						// floors to b-1, shifting every bone down by one. The +1 lands the floor on b and
+						// cannot cross into the next element (offset is a multiple of regsPerElem).
 						string idx = baseElem == 0
-							? $"{relAddrReg} / {regsPerElem}"
-							: $"{baseElem} + {relAddrReg} / {regsPerElem}";
+							? $"({relAddrReg} + 1) / {regsPerElem}"
+							: $"{baseElem} + ({relAddrReg} + 1) / {regsPerElem}";
 						sourceRegisterName = data.Type.ParameterClass == ParameterClass.MatrixColumns
 							? string.Format("transpose({0}[{1}])[{2}]", decl.Name, idx, offsetFromMember)
 							: string.Format("{0}[{1}][{2}]", decl.Name, idx, offsetFromMember);
@@ -473,11 +478,27 @@ namespace DXDecompiler.DX9Shader
 							return null;
 						}
 						byte[] swizzle = instruction.GetSourceSwizzleComponents(srcIndex);
+						// Same non-prefix-write-mask alignment as the float def-constant path below:
+						// a masked destination reads the source at the write-mask channels, not the
+						// first N swizzle slots.
+						int[] intSlots = { 0, 1, 2, 3 };
+						if(instruction.HasDestination &&
+							instruction.Opcode != Opcode.Dp3 &&
+							instruction.Opcode != Opcode.Dp4)
+						{
+							ComponentFlags intMask = instruction.GetDestinationWriteMask();
+							var s = new List<int>();
+							for(int c = 0; c < 4; c++)
+								if((intMask & (ComponentFlags)(1 << c)) != ComponentFlags.None)
+									s.Add(c);
+							while(s.Count < 4) s.Add(s.Count == 0 ? 0 : s[s.Count - 1]);
+							intSlots = s.ToArray();
+						}
 						uint[] constant = {
-								constantInt[swizzle[0]],
-								constantInt[swizzle[1]],
-								constantInt[swizzle[2]],
-								constantInt[swizzle[3]] };
+								constantInt[swizzle[intSlots[0]]],
+								constantInt[swizzle[intSlots[1]]],
+								constantInt[swizzle[intSlots[2]]],
+								constantInt[swizzle[intSlots[3]]] };
 
 						switch(instruction.GetSourceModifier(srcIndex))
 						{
