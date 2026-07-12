@@ -1,0 +1,9 @@
+# .NET build output
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+*.suo
+
+# Local shader inputs/outputs (client assets are not committed)
+*.fxo
