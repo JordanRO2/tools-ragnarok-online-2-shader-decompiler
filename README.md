@@ -74,10 +74,13 @@ Reconstruction:
 
 ## Status
 - **Compile round-trip:** 39/39 RO2 client effect shaders recompile with `fxc /T fx_2_0`.
-- **Behavioural round-trip** (`fxotest`, REF device, pixel-exact diff): 20/39 render bit-identically
-  to the original. The `fxotest` harness drove three correctness fixes (lrp argument order, dropped
-  `_sat` result modifier, and `def`-constant vectors truncated in `dp3`/`dp4`). The remaining 19 are:
-  the 13 GPU-skinning character shaders, whose bone-matrix relative addressing (`c[a0.x]`) fxc
-  re-lowers into a numerically-divergent sequence — a known limitation of reconstructing low-level
-  register addressing back into HLSL matrix-array indexing — plus a few others still under review.
-  The pixel-shading path (colours, lighting, post-processing) round-trips faithfully.
+- **Behavioural round-trip** (`fxotest`, REF device, pixel-exact diff): 26/39 render bit-identically
+  to the original. The `fxotest` harness drove five correctness fixes: lrp argument order; dropped
+  `_sat` result modifier; `def`-constant vectors truncated in `dp3`/`dp4`; `dp3` emitted as a
+  4-component `dot()` (fxc widened it to `dp4`, pulling in a live `.w`); and `def`-constant vectors
+  read at the first-N swizzle slots instead of the destination write-mask channels (non-prefix masks
+  like `.xz`). The remaining 13 are the GPU-skinning character shaders, whose bone-matrix relative
+  addressing (`c[a0.x]`) fxc re-lowers into a numerically-divergent sequence — a known limitation of
+  reconstructing low-level register addressing back into HLSL matrix-array indexing. Every
+  non-skinning effect (all pixel-shading: colours, lighting, post-processing, terrain, water) is
+  behaviour-exact.

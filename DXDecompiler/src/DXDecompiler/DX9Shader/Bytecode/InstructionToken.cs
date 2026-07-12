@@ -399,6 +399,14 @@ namespace DXDecompiler.DX9Shader
 						break;
 				}
 			}
+			// A Dp3 in HLSL must dot exactly 3 components. When the source is a float4 register,
+			// eliding the identity swizzle (the "xyz" -> "" case below) lets fxc widen dot() into a
+			// 4-component Dp4 that pulls the register's live .w channel into the result. Keep .xyz
+			// explicit for Dp3.
+			if(hlsl && Opcode == Opcode.Dp3 && swizzleName == "xyz")
+			{
+				return ".xyz";
+			}
 			switch(swizzleName)
 			{
 				case "xxx":

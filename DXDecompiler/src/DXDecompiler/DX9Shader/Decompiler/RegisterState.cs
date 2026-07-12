@@ -535,11 +535,33 @@ namespace DXDecompiler.DX9Shader
 						}
 
 						byte[] swizzle = instruction.GetSourceSwizzleComponents(srcIndex);
+						// A masked ALU destination is evaluated per channel, so the source components
+						// that survive are those at the destination write-mask channels -- NOT the first
+						// N swizzle slots (mirrors GetSourceSwizzleName's HLSL path). Without this a
+						// non-prefix mask like .xz reads slots 0,1 instead of 0,2, so e.g. "c.yyxw" under
+						// .xz collapses to "1" (slots 0,1 both == y) instead of the correct float2(1, 0).
+						int[] sourceSlots = { 0, 1, 2, 3 };
+						if(instruction.HasDestination &&
+							instruction.Opcode != Opcode.Dp3 &&
+							instruction.Opcode != Opcode.Dp4)
+						{
+							ComponentFlags writeMask = instruction.GetDestinationWriteMask();
+							var slots = new List<int>();
+							for(int c = 0; c < 4; c++)
+							{
+								if((writeMask & (ComponentFlags)(1 << c)) != ComponentFlags.None)
+								{
+									slots.Add(c);
+								}
+							}
+							while(slots.Count < 4) slots.Add(slots.Count == 0 ? 0 : slots[slots.Count - 1]);
+							sourceSlots = slots.ToArray();
+						}
 						float[] constant = {
-							constantRegister[swizzle[0]],
-							constantRegister[swizzle[1]],
-							constantRegister[swizzle[2]],
-							constantRegister[swizzle[3]] };
+							constantRegister[swizzle[sourceSlots[0]]],
+							constantRegister[swizzle[sourceSlots[1]]],
+							constantRegister[swizzle[sourceSlots[2]]],
+							constantRegister[swizzle[sourceSlots[3]]] };
 
 						switch(instruction.GetSourceModifier(srcIndex))
 						{
