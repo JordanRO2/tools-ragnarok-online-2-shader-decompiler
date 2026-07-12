@@ -228,7 +228,8 @@ namespace DXDecompiler.DX9Shader
 					WriteLine("{0} = log2({1});", GetDestinationName(instruction), GetSourceName(instruction, 1));
 					break;
 				case Opcode.Lrp:
-					WriteLine("{0} = lerp({2}, {3}, {1});", GetDestinationName(instruction),
+					// D3D9 lrp: dest = src2 + src0*(src1-src2) = lerp(src2, src1, src0).
+					WriteLine("{0} = lerp({3}, {2}, {1});", GetDestinationName(instruction),
 						GetSourceName(instruction, 1), GetSourceName(instruction, 2), GetSourceName(instruction, 3));
 					break;
 				case Opcode.Mad:
@@ -326,6 +327,13 @@ namespace DXDecompiler.DX9Shader
 					break;
 				default:
 					throw new NotImplementedException(instruction.Opcode.ToString());
+			}
+			// D3D9 `_sat` result modifier clamps the written result to [0,1]; apply it after the op.
+			if(instruction.HasDestination &&
+				(instruction.GetDestinationResultModifier() & ResultModifier.Saturate) != 0)
+			{
+				WriteIndent();
+				WriteLine("{0} = saturate({0});", GetDestinationName(instruction));
 			}
 		}
 		// The cmp condition (src0) is a broadcast of a single channel in D3D9. Collapse a

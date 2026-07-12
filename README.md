@@ -12,6 +12,10 @@ actually recompiles. `fxo2hlsl` is a small CLI wrapper around the library.
 ## Layout
 - `DXDecompiler/` — the forked decompiler library (patched).
 - `fxo2hlsl/` — CLI runner: `.fxo`/`.o` → `.hlsl` (or raw D3D9 assembly).
+- `fxotest/` — a D3D9 render-diff harness that validates *behavioural* equivalence: it renders
+  the original and the recompiled `.fxo` through the same deterministic reference (REF) device
+  with identical inputs and diffs the pixels (needs `SharpDX.Direct3D9`). Usage:
+  `fxotest <original.fxo> <recompiled.fxo>`.
 
 ## Build
 Requires the .NET SDK (net10.0).
@@ -69,4 +73,11 @@ Reconstruction:
   (`v#` → `COLOR`); `RastOut` fog / point-size outputs remapped off the illegal `POSITION1`.
 
 ## Status
-39/39 RO2 client effect shaders recompile with `fxc /T fx_2_0`.
+- **Compile round-trip:** 39/39 RO2 client effect shaders recompile with `fxc /T fx_2_0`.
+- **Behavioural round-trip** (`fxotest`, REF device, pixel-exact diff): 20/39 render bit-identically
+  to the original. The `fxotest` harness drove three correctness fixes (lrp argument order, dropped
+  `_sat` result modifier, and `def`-constant vectors truncated in `dp3`/`dp4`). The remaining 19 are:
+  the 13 GPU-skinning character shaders, whose bone-matrix relative addressing (`c[a0.x]`) fxc
+  re-lowers into a numerically-divergent sequence — a known limitation of reconstructing low-level
+  register addressing back into HLSL matrix-array indexing — plus a few others still under review.
+  The pixel-shading path (colours, lighting, post-processing) round-trips faithfully.

@@ -568,6 +568,10 @@ namespace DXDecompiler.DX9Shader
 							}
 							destLength = 4;
 						}
+						// dp3/dp4 read 3/4 source components regardless of the destination write mask,
+						// so a def-constant vector must not be truncated to the (often scalar) dest width.
+						if(instruction.Opcode == Opcode.Dp3) destLength = 3;
+						else if(instruction.Opcode == Opcode.Dp4) destLength = 4;
 						switch(destLength)
 						{
 							case 1:
