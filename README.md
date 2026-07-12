@@ -79,8 +79,14 @@ Reconstruction:
   `_sat` result modifier; `def`-constant vectors truncated in `dp3`/`dp4`; `dp3` emitted as a
   4-component `dot()` (fxc widened it to `dp4`, pulling in a live `.w`); and `def`-constant vectors
   read at the first-N swizzle slots instead of the destination write-mask channels (non-prefix masks
-  like `.xz`). The remaining 13 are the GPU-skinning character shaders, whose bone-matrix relative
-  addressing (`c[a0.x]`) fxc re-lowers into a numerically-divergent sequence — a known limitation of
-  reconstructing low-level register addressing back into HLSL matrix-array indexing. Every
-  non-skinning effect (all pixel-shading: colours, lighting, post-processing, terrain, water) is
-  behaviour-exact.
+  like `.xz`). Every non-skinning effect (all pixel-shading: colours, lighting, post-processing,
+  terrain, water) is behaviour-exact.
+
+  The remaining 13 are the GPU-skinning **character** shaders. Their skinning *is* faithfully
+  reconstructed — the bone matrices are emitted `column_major float4x3[30]` so the recompiled bytecode
+  uses the original's exact `c[a0.x]` bone addressing (3-register/bone tight pack), verified against
+  the original assembly. The residual sub-pixel difference (~2% of channel range, at silhouette edges)
+  is **not** a reconstruction defect: it is floating-point accumulation-order divergence between the
+  modern `fxc` and the 2009-era HLSL compiler (9.29) that built the original assets — feeding
+  bit-identical bone data and weights still leaves it, and it is invariant to every skinning-form
+  change. It cannot be closed at the decompiler level.

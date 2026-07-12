@@ -110,7 +110,13 @@ namespace DXDecompiler.DX9Shader.FX9
 					sb.Append(string.Format("{0}x{1}", Columns, Rows));
 					break;
 				case ParameterClass.MatrixRows:
-					sb.Append("row_major ");
+					// A relatively-addressed matrix ARRAY (skinning bone matrices) is tight-packed by
+					// D3DX with a Columns-sized register stride (e.g. float4x3[30] -> 90 regs, 3/bone);
+					// emitting row_major makes fxc allocate a Rows-sized stride (120 regs, 4/bone) and
+					// mis-fetch. column_major yields the Columns-sized stride matching the original and
+					// still reflects as MatrixRows{Rows}x{Columns}. Only flip array matrices; scalar
+					// transforms (matView/matProj/InvView, Elements 0) stay row_major.
+					sb.Append(ElementCount > 1 ? "column_major " : "row_major ");
 					sb.Append(ParameterType.ToString().ToLower());
 					sb.Append(string.Format("{0}x{1}", Rows, Columns));
 					break;
