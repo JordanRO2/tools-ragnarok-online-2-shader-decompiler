@@ -7,3 +7,6 @@
 
 # Local shader inputs/outputs (client assets are not committed)
 *.fxo
+
+# Enhanced client shaders (assets + notes, kept local, not committed)
+enhanced-shaders/
