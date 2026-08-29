@@ -13,6 +13,14 @@ namespace DXDecompiler.DX9Shader
 		private readonly bool _doAstAnalysis;
 		private readonly bool _emitGlobals;
 		private int _iterationDepth = 0;
+		// Matrix arrays (skinning bone palettes) read with relative addressing must be declared as
+		// a flat float4[registerCount] to match the reconstructed access (see RegisterState).
+		private readonly IDictionary<string, uint> _relativeMatrixArrays;
+		// Register stride (Columns) of the shader's bone-palette matrix arrays. When set, the mova that
+		// loads the address register a0 is rescaled by this factor so a0 holds the plain bone index
+		// (the palette is reconstructed as a bone-indexed matrix array; see RegisterState). null when
+		// there is no such array or strides disagree.
+		private readonly uint? _relativeMatrixArrayStride;
 
 		public RegisterState _registers;
 		string _entryPoint;
@@ -22,6 +30,8 @@ namespace DXDecompiler.DX9Shader
 			_shader = shader;
 			_doAstAnalysis = doAstAnalysis;
 			_emitGlobals = emitGlobals;
+			_relativeMatrixArrays = RegisterState.GetRelativeMatrixArrays(shader);
+			_relativeMatrixArrayStride = RegisterState.GetRelativeMatrixArrayStride(shader);
 			if(string.IsNullOrEmpty(entryPoint))
 			{
 				_entryPoint = $"{_shader.Type}Main";
@@ -249,7 +259,20 @@ namespace DXDecompiler.DX9Shader
 					break;
 				case Opcode.MovA:
 					// D3D9 mova rounds to nearest before addressing; a0 is declared int4.
-					WriteLine("{0} = round({1});", GetDestinationName(instruction), GetSourceName(instruction, 1));
+					// When the address register drives a bone-palette matrix array (reconstructed as a
+					// bone-indexed column_major float{R}x{C}[] -- see RegisterState/EffectHLSLWriter), the
+					// original a0 holds bone*C. Divide the source by C so a0 holds the plain bone index;
+					// fxc folds the constant (e.g. 765/3 -> 255) so no runtime divide is emitted, then it
+					// re-multiplies the index by C when addressing the array, restoring stride-C fetches.
+					if(_relativeMatrixArrayStride is uint stride && stride > 1)
+					{
+						WriteLine("{0} = round(({1}) / {2});", GetDestinationName(instruction),
+							GetSourceName(instruction, 1), stride);
+					}
+					else
+					{
+						WriteLine("{0} = round({1});", GetDestinationName(instruction), GetSourceName(instruction, 1));
+					}
 					break;
 				case Opcode.Mul:
 					WriteLine("{0} = {1} * {2};", GetDestinationName(instruction),
@@ -510,6 +533,18 @@ namespace DXDecompiler.DX9Shader
 		}
 		private void Write(ConstantDeclaration declaration)
 		{
+			if(_relativeMatrixArrays.ContainsKey(declaration.Name))
+			{
+				// Bone-palette matrix array: declare column_major float{R}x{C}[elements] so it recompiles
+				// with the original reflected matrix-array type and tight register packing (C regs/bone),
+				// matching the bone-indexed matrix access reconstructed in the body (see RegisterState).
+				WriteIndent();
+				WriteLine("column_major {0}{1}x{2} {3}[{4}];",
+					declaration.ParameterType.ToString().ToLower(), declaration.Rows, declaration.Columns,
+					declaration.Name, declaration.Elements);
+				WriteLine();
+				return;
+			}
 			Write(declaration.Type, declaration.Name);
 			if(!declaration.DefaultValue.All(v => v == 0))
 			{

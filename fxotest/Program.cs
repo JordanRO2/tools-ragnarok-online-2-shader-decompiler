@@ -59,6 +59,42 @@ namespace fxotest
             }
             if (dev == null) { Console.Error.WriteLine("no D3D9 device"); return 2; }
 
+            // --params <fxo>: dump the D3DX-reflected effect parameter table (what the engine sees
+            // to bind constants by semantic). Used to compare an original vs a recompiled effect.
+            if (args[0] == "--params")
+            {
+                var fxp = Effect.FromMemory(dev, File.ReadAllBytes(args[1]), ShaderFlags.None);
+                for (int i = 0; i < fxp.Description.Parameters; i++)
+                {
+                    var hh = fxp.GetParameter(null, i);
+                    var dd = fxp.GetParameterDescription(hh);
+                    Console.WriteLine($"P\t{dd.Name}\tClass={dd.Class}\tType={dd.Type}\tRows={dd.Rows}\tCols={dd.Columns}\tElems={dd.Elements}\tSem={dd.Semantic}\tBytes={dd.Bytes}");
+                }
+                // Technique + annotation dump (what Gamebryo reads to set up skinning: BonesPerPartition,
+                // BlendIndicesAsD3DColor, shadername, UsesNiRenderState, Implementation).
+                for (int t = 0; t < fxp.Description.Techniques; t++)
+                {
+                    var th = fxp.GetTechnique(t);
+                    var td = fxp.GetTechniqueDescription(th);
+                    Console.WriteLine($"T\t{td.Name}\tpasses={td.Passes}\tannos={td.Annotations}");
+                    for (int a = 0; a < td.Annotations; a++)
+                    {
+                        var ah = fxp.GetAnnotation(th, a);
+                        var ad = fxp.GetParameterDescription(ah);
+                        string val;
+                        try {
+                            if (ad.Type == ParameterType.String) val = fxp.GetString(ah);
+                            else if (ad.Type == ParameterType.Bool) val = fxp.GetValue<int>(ah).ToString();
+                            else if (ad.Type == ParameterType.Int) val = fxp.GetValue<int>(ah).ToString();
+                            else if (ad.Type == ParameterType.Float) val = fxp.GetValue<float>(ah).ToString();
+                            else val = "?";
+                        } catch { val = "<err>"; }
+                        Console.WriteLine($"  A\t{td.Name}\t{ad.Name}\t{ad.Type}\t{val}");
+                    }
+                }
+                return 0;
+            }
+
             // Shared, deterministic scene resources.
             var decl = MakeDeclaration(dev);
             var vb = MakeGridVertexBuffer(dev, out int primCount);

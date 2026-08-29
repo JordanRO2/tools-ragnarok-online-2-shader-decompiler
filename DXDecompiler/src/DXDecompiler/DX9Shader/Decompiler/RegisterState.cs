@@ -264,23 +264,24 @@ namespace DXDecompiler.DX9Shader
 						(data.Type.ParameterClass == ParameterClass.MatrixColumns ||
 						 data.Type.ParameterClass == ParameterClass.MatrixRows))
 					{
-						// Relative addressing into a matrix ARRAY (e.g. bone skinning: c2[a0.x] -> SkinBone[a0.x/3]).
-						// a0.x holds the register offset (element * registersPerMatrix); recover the array index.
-						uint regsPerElem = data.Type.ParameterClass == ParameterClass.MatrixColumns
-							? data.Type.Columns : data.Type.Rows;
-						if(regsPerElem == 0) regsPerElem = 1;
-						uint baseElem = totalOffset / regsPerElem;
-						// a0 holds the register offset (element * regsPerElem, always an exact multiple).
-						// vs_2_0 has no integer ops, so fxc emulates the divide as floor(a0 * (1/N)) with
-						// a rounded-DOWN reciprocal (0.3333333 < 1/3): an exact 3*b yields 0.9999997*b and
-						// floors to b-1, shifting every bone down by one. The +1 lands the floor on b and
-						// cannot cross into the next element (offset is a multiple of regsPerElem).
-						string idx = baseElem == 0
-							? $"({relAddrReg} + 1) / {regsPerElem}"
-							: $"{baseElem} + ({relAddrReg} + 1) / {regsPerElem}";
-						sourceRegisterName = data.Type.ParameterClass == ParameterClass.MatrixColumns
-							? string.Format("transpose({0}[{1}])[{2}]", decl.Name, idx, offsetFromMember)
-							: string.Format("{0}[{1}][{2}]", decl.Name, idx, offsetFromMember);
+						// Relative addressing into a matrix ARRAY (bone-palette skinning, e.g. SkinBone).
+						// The array is declared column_major float{R}x{C}[elements] (see
+						// EffectHLSLWriter.GetVariableDeclaration) so it recompiles with the original
+						// reflected matrix-array type. The address register is rescaled to the BONE index
+						// (÷C) at the mova (see HlslWriter MovA), so arr[relAddrReg] selects the bone
+						// matrix; register-column `totalOffset` (0..C-1) is the column of that matrix,
+						// extracted with a static basis vector: mul(arr[bone], (0,..,1,..,0)) yields the
+						// C-th column as a float4 == the original flat register c[C*bone + totalOffset].
+						// fxc re-multiplies the bone index by C internally, restoring the stride-C asm
+						// (dp4/mad against c{k}[a0.x]) identical to the original.
+						uint columns = data.Type.Columns;
+						var basis = new string[columns];
+						for(uint c = 0; c < columns; c++)
+						{
+							basis[c] = c == totalOffset ? "1" : "0";
+						}
+						sourceRegisterName = string.Format("mul({0}[{1}], float{2}({3}))",
+							decl.Name, relAddrReg, columns, string.Join(",", basis));
 					}
 					else if(data.Type.ParameterClass == ParameterClass.MatrixRows)
 					{
@@ -458,6 +459,95 @@ namespace DXDecompiler.DX9Shader
 			// never resolve a numeric constant index to a sampler declaration.
 			return ConstantDeclarations.FirstOrDefault(c =>
 				c.RegisterSet != RegisterSet.Sampler && c.ContainsIndex(index));
+		}
+
+		// Scan a shader for matrix ARRAYS (skinning bone palettes) that are read with relative
+		// addressing (c[a0.x]). These are declared column_major float{R}x{C}[elements] and indexed by
+		// bone, so they recompile with the original reflected matrix-array parameter type (see
+		// EffectHLSLWriter.GetVariableDeclaration and the matrix-array branch of GetSourceName).
+		// Returns constant name -> register count for each such array (e.g. "SkinBone" -> 90).
+		public static IDictionary<string, uint> GetRelativeMatrixArrays(ShaderModel shader)
+		{
+			var result = new Dictionary<string, uint>();
+			if(shader?.ConstantTable == null)
+			{
+				return result;
+			}
+			var constants = shader.ConstantTable.ConstantDeclarations;
+			foreach(var instruction in shader.Instructions)
+			{
+				switch(instruction.Opcode)
+				{
+					// Def/DefI/DefB carry raw immediate data (not register operands); scanning it
+					// for the relative-address bit would produce false matches. Dcl has no sources.
+					case Opcode.Def:
+					case Opcode.DefI:
+					case Opcode.DefB:
+					case Opcode.Dcl:
+						continue;
+				}
+				for(int i = 0; i < instruction.Data.Length; i++)
+				{
+					if(!instruction.IsRelativeAddressMode(i))
+					{
+						continue;
+					}
+					var type = instruction.GetParamRegisterType(i);
+					if(type != RegisterType.Const && type != RegisterType.Const2 &&
+						type != RegisterType.Const3 && type != RegisterType.Const4)
+					{
+						continue;
+					}
+					var number = instruction.GetParamRegisterNumber(i);
+					var decl = constants.FirstOrDefault(c =>
+						c.RegisterSet != RegisterSet.Sampler && c.ContainsIndex(number));
+					if(decl != null && decl.Elements > 1 &&
+						(decl.ParameterClass == ParameterClass.MatrixColumns ||
+						 decl.ParameterClass == ParameterClass.MatrixRows))
+					{
+						result[decl.Name] = decl.RegisterCount;
+					}
+				}
+			}
+			return result;
+		}
+
+		// The register stride (registers per element == Columns) of the shader's relatively-addressed
+		// matrix arrays (skinning palettes). The address register (a0) holds bone*stride in the
+		// original asm; because the palette is reconstructed as a bone-indexed matrix array, the mova
+		// that loads a0 is rescaled by this stride (÷C) so a0 holds the plain bone index (fxc then
+		// re-multiplies by C when it addresses the array). Returns null when there is no such array or
+		// the arrays disagree on stride (mixed strides are not rescaled -- left for the caller to skip).
+		public static uint? GetRelativeMatrixArrayStride(ShaderModel shader)
+		{
+			if(shader?.ConstantTable == null)
+			{
+				return null;
+			}
+			uint? stride = null;
+			foreach(var kvp in GetRelativeMatrixArrays(shader))
+			{
+				var decl = shader.ConstantTable.ConstantDeclarations
+					.FirstOrDefault(c => c.Name == kvp.Key);
+				if(decl == null || decl.Elements == 0)
+				{
+					continue;
+				}
+				uint s = decl.RegisterCount / decl.Elements;
+				if(s == 0)
+				{
+					continue;
+				}
+				if(stride == null)
+				{
+					stride = s;
+				}
+				else if(stride != s)
+				{
+					return null; // ambiguous stride: do not rescale
+				}
+			}
+			return stride;
 		}
 
 		private string GetSourceConstantName(InstructionToken instruction, int srcIndex)
